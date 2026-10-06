@@ -32,6 +32,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
 
       - name: Build Patches (.mpp)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
         run: |
           chmod +x ./gradlew
           ./gradlew build -x test --stacktrace
