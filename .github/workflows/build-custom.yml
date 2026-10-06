@@ -1,0 +1,63 @@
+name: Build and Release Custom Patches
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'extensions/**'
+      - 'patches/**'
+
+jobs:
+  build:
+    name: Build Custom Patches
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Patches (.mpp)
+        run: |
+          chmod +x ./gradlew
+          ./gradlew build -x test --stacktrace
+
+      - name: Create or Update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MPP_FILE=$(find patches/build/libs -name "*.mpp" | head -n 1)
+          if [ -z "$MPP_FILE" ]; then
+            MPP_FILE=$(find build/libs -name "*.mpp" | head -n 1)
+          fi
+          
+          if [ -z "$MPP_FILE" ]; then
+            echo "❌ No .mpp file generated!"
+            exit 1
+          fi
+
+          echo "✅ Found binary: $MPP_FILE"
+          
+          # Delete existing latest release if present and recreate
+          gh release delete latest --yes || true
+          git tag -d latest 2>/dev/null || true
+          git push origin :refs/tags/latest 2>/dev/null || true
+
+          gh release create latest "$MPP_FILE" \
+            --title "Custom Morphe Patches (Premium & Swipe Defaults)" \
+            --notes "Custom Patches built from codeiva11/morphe-patches with YouTube Premium logo and Swipe controls default enabled." \
+            --latest
