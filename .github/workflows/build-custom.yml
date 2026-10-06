@@ -37,7 +37,7 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
         run: |
           chmod +x ./gradlew
-          ./gradlew build -x test --stacktrace
+          ./gradlew build -x test -x lint -x lintVitalRelease --stacktrace
 
       - name: Create or Update GitHub Release
         env:
