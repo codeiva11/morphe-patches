@@ -1,0 +1,110 @@
+name: Sync Upstream, Patch and Release
+
+on:
+  schedule:
+    - cron: "0 4 * * *" # Daily at 04:00 UTC
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: "Force rebuild even if no upstream changes"
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+    paths:
+      - 'extensions/**'
+      - 'patches/**'
+      - 'scripts/**'
+
+jobs:
+  sync-and-build:
+    name: Sync, Patch & Release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git Identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch and Merge Upstream
+        id: sync
+        run: |
+          git remote add upstream https://github.com/MorpheApp/morphe-patches.git || true
+          git fetch upstream main
+
+          UPSTREAM_HEAD=$(git rev-parse upstream/main)
+          LOCAL_HEAD=$(git rev-parse HEAD)
+          echo "Upstream HEAD: $UPSTREAM_HEAD"
+          echo "Local HEAD: $LOCAL_HEAD"
+
+          # Attempt merge of upstream main
+          if git merge upstream/main --no-edit; then
+            echo "Successfully merged upstream/main"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "Conflict or already up to date, continuing with local base..."
+            git merge --abort || true
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Apply Custom Premium & Swipe Defaults
+        run: |
+          python3 scripts/apply_custom_defaults.py
+          if [[ -n $(git status --porcelain) ]]; then
+            git add extensions/youtube/src/main/java/app/morphe/extension/youtube/settings/Settings.java
+            git commit -m "chore: ensure custom YouTube Premium header and Swipe controls defaults [skip ci]" || true
+            git push origin main || true
+          fi
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Patches (.mpp)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew build -x test -x lint -x lintVitalRelease --stacktrace
+
+      - name: Publish Custom Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MPP_FILE=$(find patches/build/libs -name "*.mpp" | head -n 1)
+          if [ -z "$MPP_FILE" ]; then
+            MPP_FILE=$(find build/libs -name "*.mpp" | head -n 1)
+          fi
+
+          if [ -z "$MPP_FILE" ]; then
+            echo "❌ No .mpp file generated!"
+            exit 1
+          fi
+
+          echo "✅ Generated custom binary: $MPP_FILE"
+
+          # Replace latest release with new binary
+          gh release delete latest --yes || true
+          git tag -d latest 2>/dev/null || true
+          git push origin :refs/tags/latest 2>/dev/null || true
+
+          gh release create latest "$MPP_FILE" \
+            --title "Custom Morphe Patches (Premium & Swipe Controls Defaults)" \
+            --notes "Automated build of Morphe Patches with YouTube Premium Header Logo and Swipe Controls enabled by default." \
+            --latest
