@@ -18,7 +18,7 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
-import androidx.core.content.FileProvider;
+import java.lang.reflect.Method;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -717,16 +717,47 @@ public class GitHubReleaseChecker {
             Intent intent = new Intent(Intent.ACTION_VIEW);
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
-            Uri uri;
+            Uri uri = null;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                String providerAuthority = context.getPackageName() + ".morphe.updater.provider";
                 try {
-                    uri = FileProvider.getUriForFile(context, providerAuthority, apkFile);
-                } catch (IllegalArgumentException iae) {
-                    uri = FileProvider.getUriForFile(context, context.getPackageName() + ".provider", apkFile);
+                    Class<?> fpClass = Class.forName("androidx.core.content.FileProvider");
+                    Method getUriMethod = null;
+                    try {
+                        getUriMethod = fpClass.getMethod("getUriForFile", Context.class, String.class, File.class);
+                    } catch (NoSuchMethodException e) {
+                        for (Method m : fpClass.getDeclaredMethods()) {
+                            if (java.lang.reflect.Modifier.isStatic(m.getModifiers())
+                                    && m.getReturnType() == Uri.class
+                                    && m.getParameterTypes().length == 3
+                                    && m.getParameterTypes()[0] == Context.class
+                                    && m.getParameterTypes()[1] == String.class
+                                    && m.getParameterTypes()[2] == File.class) {
+                                getUriMethod = m;
+                                getUriMethod.setAccessible(true);
+                                break;
+                            }
+                        }
+                    }
+                    if (getUriMethod != null) {
+                        String[] authorities = new String[] {
+                            context.getPackageName() + ".morphe.updater.provider",
+                            context.getPackageName() + ".fileprovider",
+                            context.getPackageName() + ".provider"
+                        };
+                        for (String auth : authorities) {
+                            try {
+                                uri = (Uri) getUriMethod.invoke(null, context, auth, apkFile);
+                                if (uri != null) break;
+                            } catch (Exception ignored) {}
+                        }
+                    }
+                } catch (Exception ex) {
+                    Log.e(TAG, "FileProvider reflection failed", ex);
                 }
-            } else {
+            }
+
+            if (uri == null) {
                 uri = Uri.fromFile(apkFile);
             }
 
