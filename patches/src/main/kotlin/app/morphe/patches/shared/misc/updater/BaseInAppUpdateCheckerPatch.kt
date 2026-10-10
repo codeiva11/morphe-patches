@@ -46,10 +46,11 @@ fun inAppUpdateCheckerPatch(
     )
 
     execute {
+        val targetUrl = releaseApiUrl.value ?: releaseApiUrl.default ?: "https://api.github.com/repos/codeiva11/Morphe-AutoBuilds/releases/tags/latest"
         mainActivityOnCreateFingerprint.method.addInstructions(
             0,
             """
-                const-string v0, "${releaseApiUrl.value}"
+                const-string v0, "$targetUrl"
                 invoke-static {p0, v0}, Lapp/morphe/extension/shared/updater/GitHubReleaseChecker;->checkUpdateOnStartup(Landroid/content/Context;Ljava/lang/String;)V
             """.trimIndent()
         )

@@ -6,7 +6,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -15,6 +14,11 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
 import android.util.TypedValue;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+
+import androidx.core.content.FileProvider;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -28,12 +32,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -45,7 +47,6 @@ public class GitHubReleaseChecker {
     private static final String TAG = "MorpheUpdater";
     private static final String DEFAULT_RELEASES_URL = "https://api.github.com/repos/codeiva11/Morphe-AutoBuilds/releases/tags/latest";
     private static boolean hasCheckedThisSession = false;
-    private static final AtomicBoolean isSilentDownloading = new AtomicBoolean(false);
 
     public static void checkUpdateOnStartup(final Context context) {
         checkUpdateOnStartup(context, DEFAULT_RELEASES_URL);
@@ -57,7 +58,8 @@ public class GitHubReleaseChecker {
         }
         hasCheckedThisSession = true;
 
-        final String targetUrl = (customUrl != null && !customUrl.isEmpty()) ? customUrl : DEFAULT_RELEASES_URL;
+        final String targetUrl = (customUrl != null && !customUrl.isEmpty() && !"null".equalsIgnoreCase(customUrl))
+                ? customUrl : DEFAULT_RELEASES_URL;
 
         new Thread(new Runnable() {
             @Override
@@ -154,16 +156,22 @@ public class GitHubReleaseChecker {
                     if (isNewerVer || isNewerBuild) {
                         final String finalDownloadUrl = downloadUrl;
                         final String finalCurrentVersion = currentVersion;
-                        final String finalLatestVersion = extractedLatestVersion;
                         final boolean finalIsRebuild = isNewerBuild && !isNewerVer;
                         final String finalAssetName = matchedAssetName;
+                        final String finalLatestVersion = extractedLatestVersion;
+                        final long finalAssetTime = assetUpdatedAtMillis;
+
+                        final String apkFileName = (matchedAssetName != null && !matchedAssetName.isEmpty())
+                                ? matchedAssetName
+                                : (appPrefix + "-v" + finalLatestVersion + ".apk");
 
                         File targetDir = getUpdateDirectory(context);
-                        final File finalFile = new File(targetDir, matchedAssetName);
+                        final File finalFile = new File(targetDir, apkFileName);
 
-                        cleanupOldDownloads(context, matchedAssetName);
+                        cleanupOldDownloads(context, apkFileName);
 
                         if (isValidApk(context, finalFile)) {
+                            // Already completely downloaded and valid! Show instant install dialog directly
                             new Handler(Looper.getMainLooper()).post(new Runnable() {
                                 @Override
                                 public void run() {
@@ -172,8 +180,14 @@ public class GitHubReleaseChecker {
                                 }
                             });
                         } else {
-                            downloadApkSilently(context, finalLatestVersion, finalDownloadUrl,
-                                    finalCurrentVersion, finalIsRebuild, finalAssetName, finalFile);
+                            // Show update prompt immediately like Google Photos
+                            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    showUpdateDialog(context, finalLatestVersion, finalDownloadUrl,
+                                            finalCurrentVersion, finalIsRebuild, finalAssetTime, finalAssetName, appPrefix);
+                                }
+                            });
                         }
                     } else {
                         cleanupOldDownloads(context, null);
@@ -282,18 +296,168 @@ public class GitHubReleaseChecker {
         }
     }
 
-    private static void downloadApkSilently(final Context context, final String latestVersion,
-                                            final String downloadUrl, final String currentVersion,
-                                            final boolean isRebuild, final String assetName,
-                                            final File finalFile) {
-        if (!isSilentDownloading.compareAndSet(false, true)) {
+    private static void showUpdateDialog(final Context context, final String newVersion, final String downloadUrl,
+                                         final String currentVersion, final boolean isRebuild, final long assetTime,
+                                         final String assetName, final String appPrefix) {
+        if (!(context instanceof Activity) || ((Activity) context).isFinishing()) {
             return;
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && ((Activity) context).isDestroyed()) {
+            return;
+        }
+
+        String appName = "App";
+        try {
+            CharSequence label = context.getPackageManager().getApplicationLabel(context.getApplicationInfo());
+            if (label != null && label.length() > 0) {
+                appName = label.toString();
+            }
+        } catch (Exception ignored) {}
+
+        String displayName = (assetName != null && !assetName.isEmpty())
+                ? assetName
+                : (appPrefix + "-v" + newVersion + ".apk");
+
+        String message;
+        if (isRebuild) {
+            message = "An updated build of " + appName + " (v" + newVersion + ") is available.\n\n" +
+                      "Package: " + displayName + "\n\n" +
+                      "Would you like to download and install this latest build?";
+        } else {
+            message = "A new patched version of " + appName + " is available.\n\n" +
+                      "Installed version: " + currentVersion + "\n" +
+                      "Latest version: " + newVersion + "\n" +
+                      "Package: " + displayName + "\n\n" +
+                      "Would you like to download and install it?";
+        }
+
+        new AlertDialog.Builder(context, getDialogTheme(context))
+                .setTitle(isRebuild ? "Build Update Available" : "Update Available")
+                .setMessage(message)
+                .setPositiveButton("Update", (dialog, which) -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        boolean canInstall = false;
+                        try {
+                            canInstall = context.getPackageManager().canRequestPackageInstalls();
+                        } catch (SecurityException se) {
+                            Log.e(TAG, "Missing REQUEST_INSTALL_PACKAGES check", se);
+                        }
+                        if (!canInstall) {
+                            new AlertDialog.Builder(context, getDialogTheme(context))
+                                    .setTitle("Permission Required")
+                                    .setMessage(appName + " requires permission to install updates.\n\nPlease allow 'Install unknown apps' in the next screen, then tap Update again.")
+                                    .setPositiveButton("Settings", (d, w) -> {
+                                        try {
+                                            Intent settingsIntent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+                                            settingsIntent.setData(Uri.parse("package:" + context.getPackageName()));
+                                            settingsIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                            context.startActivity(settingsIntent);
+                                        } catch (Exception ex) {
+                                            Intent genericIntent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+                                            genericIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                            context.startActivity(genericIntent);
+                                        }
+                                    })
+                                    .setNegativeButton("Cancel", null)
+                                    .show();
+                            return;
+                        }
+                    }
+                    downloadAndInstallApk(context, newVersion, downloadUrl, assetName);
+                })
+                .setNegativeButton("Later", null)
+                .setCancelable(true)
+                .show();
+    }
+
+    private static void downloadAndInstallApk(final Context context, final String version, final String downloadUrl,
+                                              final String assetName) {
+        if (!(context instanceof Activity) || ((Activity) context).isFinishing()) {
+            return;
+        }
+
+        final String apkFileName = (assetName != null && !assetName.isEmpty())
+                ? assetName
+                : ("app-v" + version + "-patched.apk");
+
+        final float density = context.getResources().getDisplayMetrics().density;
+        final int pad20 = (int) (20 * density);
+        final int pad10 = (int) (10 * density);
+        final int pad6 = (int) (6 * density);
+
+        final AlertDialog.Builder dialogBuilder = new AlertDialog.Builder(context, getDialogTheme(context));
+        final Context dialogContext = dialogBuilder.getContext();
+
+        final boolean isDark = (context.getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        final int primaryTextColor = resolveThemeColor(dialogContext, android.R.attr.textColorPrimary, isDark ? 0xFFFFFFFF : 0xDE000000);
+        final int secondaryTextColor = resolveThemeColor(dialogContext, android.R.attr.textColorSecondary, isDark ? 0xB3FFFFFF : 0x8A000000);
+
+        LinearLayout layout = new LinearLayout(dialogContext);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(pad20, (int) (14 * density), pad20, pad10);
+
+        TextView fileNameView = new TextView(dialogContext);
+        fileNameView.setText(apkFileName);
+        fileNameView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        fileNameView.setTypeface(null, android.graphics.Typeface.BOLD);
+        fileNameView.setSingleLine(true);
+        fileNameView.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
+        fileNameView.setTextColor(primaryTextColor);
+        LinearLayout.LayoutParams fnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        fileNameView.setLayoutParams(fnLp);
+        layout.addView(fileNameView);
+
+        final ProgressBar progressBar = new ProgressBar(dialogContext, null, android.R.attr.progressBarStyleHorizontal);
+        progressBar.setMax(1000);
+        progressBar.setIndeterminate(true);
+        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        pbLp.setMargins(0, pad10, 0, pad10);
+        progressBar.setLayoutParams(pbLp);
+        layout.addView(progressBar);
+
+        final TextView progressInfoView = new TextView(dialogContext);
+        progressInfoView.setText("Connecting to server...");
+        progressInfoView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        progressInfoView.setTextColor(primaryTextColor);
+        LinearLayout.LayoutParams piLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        progressInfoView.setLayoutParams(piLp);
+        layout.addView(progressInfoView);
+
+        final TextView speedInfoView = new TextView(dialogContext);
+        speedInfoView.setText("Speed: calculating...  •  ETA: --");
+        speedInfoView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        speedInfoView.setTextColor(secondaryTextColor);
+        LinearLayout.LayoutParams speedLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        speedLp.setMargins(0, pad6, 0, 0);
+        speedInfoView.setLayoutParams(speedLp);
+        layout.addView(speedInfoView);
+
+        final AtomicBoolean isCancelled = new AtomicBoolean(false);
+        final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+        final AlertDialog downloadDialog = dialogBuilder
+                .setTitle("Downloading Update")
+                .setView(layout)
+                .setCancelable(false)
+                .setNegativeButton("Cancel", (dialog, which) -> {
+                    isCancelled.set(true);
+                })
+                .create();
+
+        downloadDialog.show();
 
         new Thread(new Runnable() {
             @Override
             public void run() {
-                File tempFile = new File(finalFile.getParentFile(), finalFile.getName() + ".tmp");
+                File targetDir = getUpdateDirectory(context);
+                File tempFile = new File(targetDir, apkFileName + ".tmp");
+                File finalFile = new File(targetDir, apkFileName);
+
                 if (tempFile.exists()) tempFile.delete();
                 if (finalFile.exists()) finalFile.delete();
 
@@ -305,6 +469,7 @@ public class GitHubReleaseChecker {
                     String currentUrl = downloadUrl;
                     int redirectCount = 0;
                     while (redirectCount < 7) {
+                        if (isCancelled.get()) return;
                         URL url = new URL(currentUrl);
                         conn = (HttpURLConnection) url.openConnection();
                         conn.setInstanceFollowRedirects(false);
@@ -337,46 +502,140 @@ public class GitHubReleaseChecker {
                         break;
                     }
 
+                    if (isCancelled.get()) return;
+
                     int code = conn.getResponseCode();
                     if (code != HttpURLConnection.HTTP_OK) {
                         throw new IOException("Server returned HTTP " + code);
                     }
 
+                    final long totalBytes = conn.getContentLength();
                     in = new BufferedInputStream(conn.getInputStream(), 131072);
                     out = new FileOutputStream(tempFile);
 
                     byte[] buffer = new byte[131072];
                     int bytesRead;
+                    long downloadedBytes = 0;
+
+                    long startTime = System.currentTimeMillis();
+                    long lastSpeedCalcTime = startTime;
+                    long bytesSinceLastSpeed = 0;
+                    double currentSpeedBps = 0.0;
+                    long lastUiUpdate = 0;
+
                     while ((bytesRead = in.read(buffer)) != -1) {
+                        if (isCancelled.get()) {
+                            tempFile.delete();
+                            return;
+                        }
+
                         out.write(buffer, 0, bytesRead);
+                        downloadedBytes += bytesRead;
+                        bytesSinceLastSpeed += bytesRead;
+
+                        long now = System.currentTimeMillis();
+                        if (now - lastSpeedCalcTime >= 500) {
+                            long elapsed = now - lastSpeedCalcTime;
+                            currentSpeedBps = (bytesSinceLastSpeed * 1000.0) / elapsed;
+                            lastSpeedCalcTime = now;
+                            bytesSinceLastSpeed = 0;
+                        }
+
+                        if (now - lastUiUpdate >= 80) {
+                            lastUiUpdate = now;
+                            final long curBytes = downloadedBytes;
+                            final double speed = currentSpeedBps;
+
+                            mainHandler.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (isCancelled.get() || !downloadDialog.isShowing()) return;
+
+                                    if (totalBytes > 0) {
+                                        progressBar.setIndeterminate(false);
+                                        int permille = (int) ((curBytes * 1000L) / totalBytes);
+                                        progressBar.setProgress(permille);
+
+                                        double pct = (curBytes * 100.0) / totalBytes;
+                                        double curMb = curBytes / (1024.0 * 1024.0);
+                                        double totMb = totalBytes / (1024.0 * 1024.0);
+                                        progressInfoView.setText(String.format(Locale.US, "%.1f%%  (%.1f / %.1f MB)", pct, curMb, totMb));
+
+                                        if (speed > 1024) {
+                                            long remainingBytes = totalBytes - curBytes;
+                                            long etaSeconds = (long) (remainingBytes / speed);
+                                            String speedStr = speed > (1024 * 1024)
+                                                    ? String.format(Locale.US, "%.1f MB/s", speed / (1024.0 * 1024.0))
+                                                    : String.format(Locale.US, "%.0f KB/s", speed / 1024.0);
+                                            String etaStr = etaSeconds >= 60
+                                                    ? String.format(Locale.US, "%dm %ds", etaSeconds / 60, etaSeconds % 60)
+                                                    : String.format(Locale.US, "%ds", etaSeconds);
+                                            speedInfoView.setText(String.format(Locale.US, "Speed: %s  •  ETA: %s", speedStr, etaStr));
+                                        }
+                                    } else {
+                                        progressBar.setIndeterminate(true);
+                                        double curMb = curBytes / (1024.0 * 1024.0);
+                                        progressInfoView.setText(String.format(Locale.US, "Downloaded %.1f MB", curMb));
+                                    }
+                                }
+                            });
+                        }
                     }
+
                     out.flush();
+                    out.close();
+                    out = null;
+                    in.close();
+                    in = null;
 
-                    File targetApk = finalFile;
-                    if (tempFile.renameTo(finalFile) || copyFile(tempFile, finalFile)) {
+                    if (isCancelled.get()) {
                         tempFile.delete();
-                    } else {
-                        targetApk = tempFile;
+                        return;
                     }
 
-                    if (isValidApk(context, targetApk)) {
-                        final File readyFile = targetApk;
-                        new Handler(Looper.getMainLooper()).post(new Runnable() {
-                            @Override
-                            public void run() {
-                                showReadyToInstallDialog(context, latestVersion, readyFile, currentVersion,
-                                        isRebuild, assetName);
-                            }
-                        });
+                    if (!tempFile.renameTo(finalFile)) {
+                        boolean copied = copyFile(tempFile, finalFile);
+                        tempFile.delete();
+                        if (!copied) {
+                            throw new IOException("Failed to save downloaded APK to destination file");
+                        }
                     }
+
+                    // Download complete! Dismiss progress and trigger install
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                if (downloadDialog.isShowing()) {
+                                    downloadDialog.dismiss();
+                                }
+                            } catch (Exception ignored) {}
+
+                            installApk(context, finalFile);
+                        }
+                    });
+
                 } catch (Exception e) {
-                    Log.e(TAG, "Error downloading update silently", e);
-                    if (tempFile.exists()) tempFile.delete();
+                    Log.e(TAG, "Download error", e);
+                    final String errorMsg = (e.getMessage() != null) ? e.getMessage() : "Network error";
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                if (downloadDialog.isShowing()) {
+                                    downloadDialog.dismiss();
+                                }
+                            } catch (Exception ignored) {}
+
+                            if (!isCancelled.get()) {
+                                showDownloadErrorDialog(context, errorMsg);
+                            }
+                        }
+                    });
                 } finally {
-                    isSilentDownloading.set(false);
-                    try { if (out != null) out.close(); } catch (Exception ignored) {}
                     try { if (in != null) in.close(); } catch (Exception ignored) {}
-                    if (conn != null) conn.disconnect();
+                    try { if (out != null) out.close(); } catch (Exception ignored) {}
+                    try { if (conn != null) conn.disconnect(); } catch (Exception ignored) {}
                 }
             }
         }).start();
@@ -455,58 +714,43 @@ public class GitHubReleaseChecker {
                 }
             }
 
-            Uri apkUri = null;
-            try {
-                Class<?> fpClass = Class.forName("androidx.core.content.FileProvider");
-                Method getUriMethod = null;
-                for (Method m : fpClass.getDeclaredMethods()) {
-                    if (java.lang.reflect.Modifier.isStatic(m.getModifiers())
-                            && m.getReturnType() == Uri.class
-                            && m.getParameterTypes().length == 3
-                            && m.getParameterTypes()[0] == Context.class
-                            && m.getParameterTypes()[1] == String.class
-                            && m.getParameterTypes()[2] == File.class) {
-                        getUriMethod = m;
-                        getUriMethod.setAccessible(true);
-                        break;
-                    }
-                }
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
-                if (getUriMethod != null) {
-                    try {
-                        apkUri = (Uri) getUriMethod.invoke(null, context, context.getPackageName() + ".fileprovider", apkFile);
-                    } catch (Exception ex) {
-                        apkUri = (Uri) getUriMethod.invoke(null, context, "com.google.android.youtube.fileprovider", apkFile);
-                    }
+            Uri uri;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                String providerAuthority = context.getPackageName() + ".morphe.updater.provider";
+                try {
+                    uri = FileProvider.getUriForFile(context, providerAuthority, apkFile);
+                } catch (IllegalArgumentException iae) {
+                    uri = FileProvider.getUriForFile(context, context.getPackageName() + ".provider", apkFile);
                 }
-            } catch (Exception e) {
-                Log.e(TAG, "Error obtaining FileProvider URI via reflection", e);
+            } else {
+                uri = Uri.fromFile(apkFile);
             }
 
-            if (apkUri == null) {
-                apkUri = Uri.fromFile(apkFile);
-            }
+            intent.setDataAndType(uri, "application/vnd.android.package-archive");
+            context.startActivity(intent);
 
-            Intent installIntent = new Intent(Intent.ACTION_VIEW);
-            installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-            installIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-
-            try {
-                List<ResolveInfo> resolveInfoList =
-                        context.getPackageManager().queryIntentActivities(installIntent, PackageManager.MATCH_DEFAULT_ONLY);
-                for (ResolveInfo resolveInfo : resolveInfoList) {
-                    String targetPackage = resolveInfo.activityInfo.packageName;
-                    context.grantUriPermission(targetPackage, apkUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                }
-            } catch (Exception ignored) {}
-
-            context.startActivity(installIntent);
         } catch (Exception e) {
-            Log.e(TAG, "Error triggering package installer", e);
+            Log.e(TAG, "Install failed", e);
             try {
                 new AlertDialog.Builder(context, getDialogTheme(context))
                         .setTitle("Installation Failed")
-                        .setMessage("Could not start package installer: " + e.getMessage())
+                        .setMessage("Failed to launch package installer: " + e.getMessage())
+                        .setPositiveButton("OK", null)
+                        .show();
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private static void showDownloadErrorDialog(Context context, String error) {
+        if (context instanceof Activity && !((Activity) context).isFinishing()) {
+            try {
+                new AlertDialog.Builder(context, getDialogTheme(context))
+                        .setTitle("Download Failed")
+                        .setMessage("Could not download the update:\n" + error + "\n\nPlease check your internet connection and try again.")
                         .setPositiveButton("OK", null)
                         .show();
             } catch (Exception ignored) {}
@@ -624,5 +868,25 @@ public class GitHubReleaseChecker {
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    private static int resolveThemeColor(Context context, int attrResId, int fallbackColor) {
+        try {
+            TypedValue tv = new TypedValue();
+            if (context.getTheme().resolveAttribute(attrResId, tv, true)) {
+                if (tv.type >= TypedValue.TYPE_FIRST_COLOR_INT && tv.type <= TypedValue.TYPE_LAST_COLOR_INT) {
+                    return tv.data;
+                }
+                int resId = tv.resourceId != 0 ? tv.resourceId : tv.data;
+                if (resId != 0) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        return context.getColor(resId);
+                    } else {
+                        return context.getResources().getColor(resId);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return fallbackColor;
     }
 }
