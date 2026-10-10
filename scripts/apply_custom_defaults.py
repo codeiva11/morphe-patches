@@ -31,9 +31,16 @@ content, c3 = re.subn(
     content
 )
 
+# 4. Spoof video streams client type -> ANDROID_CREATOR (Android Studio)
+content, c4 = re.subn(
+    r'(SPOOF_VIDEO_STREAMS_CLIENT_TYPE\s*=\s*new\s*EnumSetting<[^>]*>\s*\(\s*"morphe_spoof_video_streams_client_type"\s*,\s*ClientType\.)[A-Za-z0-9_]+',
+    r'\g<1>ANDROID_CREATOR',
+    content
+)
+
 settings_file.write_text(content, encoding="utf-8")
-print(f"Patched: HeaderLogo={c1}, SwipeLeft={c2}, SwipeRight={c3}")
-if c1 == 0 or c2 == 0 or c3 == 0:
+print(f"Patched: HeaderLogo={c1}, SwipeLeft={c2}, SwipeRight={c3}, ClientType={c4}")
+if c1 == 0 or c2 == 0 or c3 == 0 or c4 == 0:
     print("Warning: One or more settings could not be matched!")
     sys.exit(1)
-print("Settings.java successfully updated with Premium defaults.")
+print("Settings.java successfully updated with Premium & Android Studio defaults.")
