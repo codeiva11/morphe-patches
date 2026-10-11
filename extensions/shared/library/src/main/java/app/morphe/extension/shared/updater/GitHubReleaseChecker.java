@@ -306,13 +306,14 @@ public class GitHubReleaseChecker {
             return;
         }
 
-        String appName = "App";
+        String tempAppName = "App";
         try {
             CharSequence label = context.getPackageManager().getApplicationLabel(context.getApplicationInfo());
             if (label != null && label.length() > 0) {
-                appName = label.toString();
+                tempAppName = label.toString();
             }
         } catch (Exception ignored) {}
+        final String appName = tempAppName;
 
         String displayName = (assetName != null && !assetName.isEmpty())
                 ? assetName
