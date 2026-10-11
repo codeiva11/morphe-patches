@@ -762,25 +762,26 @@ public class GitHubReleaseChecker {
             return;
         }
 
-        String appName = "App";
+        String appName = "YouTube";
         try {
             CharSequence label = context.getPackageManager().getApplicationLabel(context.getApplicationInfo());
             if (label != null && label.length() > 0) {
                 appName = label.toString();
+            } else {
+                String pkg = context.getPackageName();
+                if (pkg != null && pkg.contains("music")) {
+                    appName = "YouTube Music";
+                }
             }
         } catch (Exception ignored) {}
 
         String title = isRebuild ? "Build Update Ready to Install" : "Update Ready to Install";
         String message;
         if (isRebuild) {
-            message = "An updated build of " + appName + " (v" + newVersion + ") has been downloaded in the background and is ready to install.\n\n" +
-                      "Package: " + assetName + "\n\n" +
+            message = "An updated build of " + appName + " (v" + newVersion + ") Available\n\n" +
                       "Tap 'Install Now' to update instantly with zero wait time.";
         } else {
-            message = "A new patched version of " + appName + " (v" + newVersion + ") has been downloaded in the background and is ready to install.\n\n" +
-                      "Current version: " + currentVersion + "\n" +
-                      "New version: " + newVersion + "\n" +
-                      "Package: " + assetName + "\n\n" +
+            message = "A new version of " + appName + " (v" + newVersion + ") Available\n\n" +
                       "Tap 'Install Now' to update instantly with zero wait time.";
         }
 
