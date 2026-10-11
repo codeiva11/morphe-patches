@@ -150,7 +150,7 @@ public class GitHubReleaseChecker {
 
                     boolean isNewerBuild = false;
                     if (isSameVer && assetUpdatedAtMillis > 0) {
-                        if (assetUpdatedAtMillis > (pInfo.lastUpdateTime + 60000L)) {
+                        if (assetUpdatedAtMillis > pInfo.lastUpdateTime) {
                             isNewerBuild = true;
                         }
                     }
