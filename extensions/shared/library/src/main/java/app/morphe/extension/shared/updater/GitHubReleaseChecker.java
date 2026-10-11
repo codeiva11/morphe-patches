@@ -779,20 +779,20 @@ public class GitHubReleaseChecker {
         String message;
         if (isRebuild) {
             message = "An updated build of " + appName + " (v" + newVersion + ") Available\n\n" +
-                      "Tap 'Install Now' to update instantly with zero wait time.";
+                      "Tap 'Install Update' to update instantly with zero wait time.";
         } else {
             message = "A new version of " + appName + " (v" + newVersion + ") Available\n\n" +
-                      "Tap 'Install Now' to update instantly with zero wait time.";
+                      "Tap 'Install Update' to update instantly with zero wait time.";
         }
 
         try {
             new AlertDialog.Builder(context, getDialogTheme(context))
                     .setTitle(title)
                     .setMessage(message)
-                    .setPositiveButton("Install Now", (dialog, which) -> {
+                    .setPositiveButton("Install Update", (dialog, which) -> {
                         installApk(context, apkFile);
                     })
-                    .setNegativeButton("Later", null)
+                    .setNegativeButton("Cancel", null)
                     .setCancelable(true)
                     .show();
         } catch (Exception e) {
