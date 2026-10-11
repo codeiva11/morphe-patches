@@ -739,20 +739,6 @@ public class GitHubReleaseChecker {
         }).start();
     }
 
-    private static boolean copyFile(File src, File dst) {
-        try (InputStream in = new FileInputStream(src);
-             OutputStream out = new FileOutputStream(dst)) {
-            byte[] buf = new byte[65536];
-            int len;
-            while ((len = in.read(buf)) > 0) {
-                out.write(buf, 0, len);
-            }
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
     private static void showReadyToInstallDialog(final Context context, final String newVersion, final File apkFile,
                                                  final String currentVersion, final boolean isRebuild, final String assetName) {
         if (!(context instanceof Activity) || ((Activity) context).isFinishing()) {
