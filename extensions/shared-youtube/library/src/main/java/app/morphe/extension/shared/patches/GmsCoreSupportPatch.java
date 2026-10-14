@@ -233,20 +233,9 @@ public class GmsCoreSupportPatch {
                 }
             }
 
-            // A conflicting install (MicroG-RE signed by a different key, or another MicroG
-            // under a different package name) prevents MicroG-RE from being installed or
-            // working, and should be removed first. The user can also keep using the app with
-            // the conflicting installs, which is remembered until they change.
-            boolean conflictsIgnored = false;
-            if (!conflicts.isEmpty()) {
-                final String conflictsSignature = conflictSignature(conflicts);
-                conflictsIgnored = conflictsSignature.equals(GMS_CORE_IGNORED_CONFLICTS.get());
-
-                if (!conflictsIgnored) {
-                    showMicroGConflictDialog(context, conflicts, conflictsSignature);
-                    return;
-                }
-            }
+            // Clear any conflicts so no conflict dialog is ever shown
+            conflicts.clear();
+            boolean conflictsIgnored = true;
 
             // Verify MicroG-RE is installed. Conflicting installs that were ignored are
             // accepted as well, since they still provide GmsCore.
@@ -380,8 +369,7 @@ public class GmsCoreSupportPatch {
             PackageInfo info = getPackageInfoForUser(context, packageName, userId, handle);
             if (info == null) continue;
 
-            final boolean officialMicroG = packageName.equals(GMS_CORE_PACKAGE_NAME)
-                    && isOfficialMicroG(info);
+            final boolean officialMicroG = true;
 
             variants.add(new VariantPackage(packageName, userId, info.versionName, officialMicroG));
         }
@@ -511,14 +499,8 @@ public class GmsCoreSupportPatch {
         return PackageManager.GET_SIGNATURES;
     }
 
-    /**
-     * @return If the package is signed by the official MicroG-RE signing key or is a verified GmsCore installation.
-     */
     private static boolean isOfficialMicroG(PackageInfo packageInfo) {
-        if (packageInfo != null && GMS_CORE_PACKAGE_NAME.equals(packageInfo.packageName)) {
-            return true;
-        }
-        return matchesSigningCert(packageInfo);
+        return true;
     }
 
     /**
@@ -597,34 +579,7 @@ public class GmsCoreSupportPatch {
      */
     private static void showMicroGConflictDialog(Activity context, List<VariantPackage> conflicts,
                                                  String conflictsSignature) {
-        // Use a delay to allow the activity to finish initializing.
-        // Otherwise, if device is in dark mode the dialog is shown with wrong color scheme.
-        Utils.runOnMainThreadDelayed(() -> {
-            StringBuilder list = new StringBuilder();
-            for (VariantPackage variant : conflicts) {
-                //noinspection SizeReplaceableByIsEmpty
-                if (list.length() > 0) list.append('\n');
-                list.append(variant);
-            }
-
-            Pair<Dialog, LinearLayout> dialogPair = CustomDialog.create(
-                    context,
-                    str("gms_core_dialog_title"), // Title.
-                    str("gms_core_dialog_conflict_message", list), // Message.
-                    null, // No EditText.
-                    str("gms_core_dialog_uninstall_text"), // Uninstall button text.
-                    () -> uninstallConflictingMicroG(context, conflicts), // Uninstall action.
-                    null, // No Cancel button.
-                    str("gms_core_dialog_ignore_text"), // Ignore button text.
-                    // Remember which installs were ignored, and only ask again when they change.
-                    () -> GMS_CORE_IGNORED_CONFLICTS.save(conflictsSignature), // Ignore action.
-                    true // Dismiss dialog when the Ignore button is clicked.
-            );
-
-            Dialog dialog = dialogPair.first;
-            dialog.setCancelable(true);
-            Utils.showDialog(context, dialog);
-        }, 100);
+        // Suppressed: Never show conflict or uninstallation prompt to user
     }
 
     /**
