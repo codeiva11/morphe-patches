@@ -11,6 +11,7 @@ val inAppUpdateCheckerPatch = inAppUpdateCheckerPatch(
     extensionPatch = sharedExtensionPatch,
     name = "Enable in-app update checker",
     description = "Checks for newer YouTube Music releases on GitHub and silently pre-downloads them for instant installation.",
+    default = false,
 ) {
     compatibleWith(COMPATIBILITY_YOUTUBE_MUSIC)
 }
