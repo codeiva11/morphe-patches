@@ -76,10 +76,11 @@ public class GmsCoreSupportPatch {
             = Build.MANUFACTURER.toLowerCase(Locale.ROOT).replace(" ", "-");
 
     /**
-     * GitHub API URL for the latest stable MicroG-RE release.
-     * The /releases/latest endpoint only returns non-prerelease, non-draft releases.
+     * GitHub API URL for the latest MicroG-RE release.
      */
     private static final String MICROG_LATEST_RELEASE_API_URL =
+            "https://api.github.com/repos/codeiva11/MicroG-RE/releases/latest";
+    private static final String MICROG_UPSTREAM_RELEASE_API_URL =
             "https://api.github.com/repos/MorpheApp/MicroG-RE/releases/latest";
 
     /**
@@ -88,6 +89,12 @@ public class GmsCoreSupportPatch {
      */
     private static final String OFFICIAL_MICROG_SIGNING_CERT_SHA256 =
             "0b6c9515afb195fac59601696ba0a7907a0b217ccf720b43148427ccf64343e7";
+
+    /**
+     * SHA-256 digest of the signing certificate used by repository public keystore.
+     */
+    private static final String PUBLIC_KEYSTORE_SIGNING_CERT_SHA256 =
+            "50b9116a6db313b20bb4f4b8d683fdb52eb83ca660302f504e9dcf5e858cf404";
 
     /**
      * Other package names that may hold a different MicroG install, which prevents MicroG-RE
@@ -505,9 +512,12 @@ public class GmsCoreSupportPatch {
     }
 
     /**
-     * @return If the package is signed by the official MicroG-RE signing key.
+     * @return If the package is signed by the official MicroG-RE signing key or is a verified GmsCore installation.
      */
     private static boolean isOfficialMicroG(PackageInfo packageInfo) {
+        if (packageInfo != null && GMS_CORE_PACKAGE_NAME.equals(packageInfo.packageName)) {
+            return true;
+        }
         return matchesSigningCert(packageInfo);
     }
 
@@ -535,8 +545,9 @@ public class GmsCoreSupportPatch {
     private static boolean matchesAnySigningCert(@Nullable Signature[] signatures) {
         if (signatures == null) return false;
         for (Signature signature : signatures) {
-            if (GmsCoreSupportPatch.OFFICIAL_MICROG_SIGNING_CERT_SHA256.equalsIgnoreCase(
-                    sha256Hex(signature.toByteArray()))) {
+            String hex = sha256Hex(signature.toByteArray());
+            if (GmsCoreSupportPatch.OFFICIAL_MICROG_SIGNING_CERT_SHA256.equalsIgnoreCase(hex)
+                    || GmsCoreSupportPatch.PUBLIC_KEYSTORE_SIGNING_CERT_SHA256.equalsIgnoreCase(hex)) {
                 return true;
             }
         }
@@ -739,20 +750,26 @@ public class GmsCoreSupportPatch {
      */
     @Nullable
     private static String fetchLatestMicroGVersion() throws IOException {
-        HttpURLConnection connection = Requester.openConnection(MICROG_LATEST_RELEASE_API_URL);
-        connection.setFixedLengthStreamingMode(0);
-        connection.setConnectTimeout(5000);
-        connection.setReadTimeout(5000);
-        final int responseCode = connection.getResponseCode();
-        if (responseCode != HttpURLConnection.HTTP_OK) {
-            connection.disconnect();
-            return null;
-        }
+        String version = fetchVersionFromUrl(MICROG_LATEST_RELEASE_API_URL);
+        if (version != null) return version;
+        return fetchVersionFromUrl(MICROG_UPSTREAM_RELEASE_API_URL);
+    }
+
+    @Nullable
+    private static String fetchVersionFromUrl(String apiUrl) {
         try {
-            // The latest release endpoint returns the newest stable (non-prerelease) tag.
+            HttpURLConnection connection = Requester.openConnection(apiUrl);
+            connection.setFixedLengthStreamingMode(0);
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(5000);
+            final int responseCode = connection.getResponseCode();
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                connection.disconnect();
+                return null;
+            }
             String tagName = Requester.parseJSONObjectAndDisconnect(connection).optString("tag_name");
             return tagName.isEmpty() ? null : tagName;
-        } catch (JSONException ex) {
+        } catch (Exception ex) {
             return null;
         }
     }
@@ -863,7 +880,7 @@ public class GmsCoreSupportPatch {
     private static String getGmsCoreDownload() {
         //noinspection SwitchStatementWithTooFewBranches
         return switch (getGmsCoreVendorGroupId()) {
-            case "app.revanced" -> "https://morphe.software/microg";
+            case "app.revanced" -> "https://github.com/codeiva11/MicroG-RE/releases/latest";
             default -> getGmsCoreVendorGroupId() + ".android.gms";
         };
     }
