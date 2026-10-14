@@ -12,10 +12,9 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'extensions/**'
-      - 'patches/**'
-      - 'scripts/**'
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
 
 jobs:
   sync-and-build:
@@ -52,7 +51,7 @@ jobs:
 
           if [ "$BEHIND_COUNT" -gt 0 ]; then
             echo "New upstream commits found ($BEHIND_COUNT). Merging upstream/main..."
-            if git merge upstream/main --no-edit -m "chore: sync upstream MorpheApp/morphe-patches [skip ci]"; then
+            if git merge upstream/main --no-edit -m "chore: sync upstream MorpheApp/morphe-patches"; then
               echo "Successfully merged upstream/main. Pushing merge to fork..."
               git push origin main || true
               echo "has_changes=true" >> $GITHUB_OUTPUT
@@ -73,7 +72,7 @@ jobs:
           python3 scripts/apply_custom_defaults.py
           if [[ -n $(git status --porcelain) ]]; then
             git add extensions/youtube/src/main/java/app/morphe/extension/youtube/settings/Settings.java
-            git commit -m "chore: ensure custom YouTube Premium header and Swipe controls defaults [skip ci]" || true
+            git commit -m "chore: ensure custom YouTube Premium header and Swipe controls defaults" || true
             git push origin main || true
           fi
 
