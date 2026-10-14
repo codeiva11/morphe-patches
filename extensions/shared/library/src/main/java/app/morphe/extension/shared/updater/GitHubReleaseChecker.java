@@ -109,6 +109,9 @@ public class GitHubReleaseChecker {
 
                     String currentPackageName = context.getPackageName();
                     String appPrefix = resolveAppPrefix(currentPackageName);
+                    if (appPrefix == null) {
+                        return;
+                    }
 
                     String primaryAbi = (Build.SUPPORTED_ABIS != null && Build.SUPPORTED_ABIS.length > 0)
                             ? Build.SUPPORTED_ABIS[0] : "universal";
@@ -197,10 +200,19 @@ public class GitHubReleaseChecker {
     }
 
     private static String resolveAppPrefix(String packageName) {
-        if (packageName == null) return "app";
-        if (packageName.contains("youtube.music") || packageName.equals("com.google.android.apps.youtube.music")) {
-            return "youtube-music";
+        if (packageName == null) return null;
+
+        // Excluded apps: never check or pull releases/updates
+        if (packageName.contains("camscanner") || packageName.contains("intsig")) {
+            return null;
         }
+        if (packageName.contains("youtube.music") || packageName.equals("com.google.android.apps.youtube.music")) {
+            return null;
+        }
+        if (packageName.contains("wps") || packageName.contains("moffice")) {
+            return null;
+        }
+
         if (packageName.contains("youtube") || packageName.equals("com.google.android.youtube")) {
             return "youtube";
         }
@@ -222,9 +234,6 @@ public class GitHubReleaseChecker {
         if (packageName.contains("facebook") || packageName.contains("katana")) {
             return "facebook";
         }
-        if (packageName.contains("wps") || packageName.contains("moffice")) {
-            return "wps-office";
-        }
         if (packageName.contains("twitter") || packageName.contains("x.android")) {
             return "x-new";
         }
@@ -232,6 +241,9 @@ public class GitHubReleaseChecker {
     }
 
     private static JSONObject findBestMatchingAsset(JSONArray assets, String appPrefix, String primaryAbi) {
+        if (appPrefix == null || appPrefix.isEmpty()) {
+            return null;
+        }
         JSONObject abiMatch = null;
         JSONObject universalMatch = null;
         JSONObject generalMatch = null;
@@ -241,6 +253,11 @@ public class GitHubReleaseChecker {
             if (asset == null) continue;
             String name = asset.optString("name", "");
             if (!name.endsWith(".apk")) continue;
+
+            // Explicit safety: skip any excluded app assets
+            if (name.contains("camscanner") || name.contains("youtube-music") || name.contains("wps-office")) {
+                continue;
+            }
 
             boolean matchesApp = false;
             if ("youtube".equals(appPrefix)) {

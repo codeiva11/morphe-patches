@@ -26,11 +26,12 @@ fun inAppUpdateCheckerPatch(
     extensionPatch: Patch<*>,
     name: String = "Enable in-app update checker",
     description: String = "Checks for newer releases on GitHub and silently pre-downloads them for instant installation.",
+    default: Boolean = true,
     block: BytecodePatchBuilder.() -> Unit = {},
 ) = bytecodePatch(
     name = name,
     description = description,
-    default = true,
+    default = default,
 ) {
     block()
 
