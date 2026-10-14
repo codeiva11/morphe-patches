@@ -98,25 +98,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          MPP_FILE=$(find patches/build/libs -name "*.mpp" | head -n 1)
-          if [ -z "$MPP_FILE" ]; then
-            MPP_FILE=$(find build/libs -name "*.mpp" | head -n 1)
-          fi
+          MPP_FILE=$(find patches/build/libs build/libs -name "*.mpp" ! -name "*-sources.mpp" 2>/dev/null | head -n 1)
 
           if [ -z "$MPP_FILE" ]; then
-            echo "❌ No .mpp file generated!"
+            echo "❌ No binary .mpp file generated!"
             exit 1
           fi
 
           echo "✅ Generated custom binary: $MPP_FILE"
+
+          ALL_MPP=$(find patches/build/libs build/libs -name "*.mpp" 2>/dev/null | sort -u)
 
           # Replace latest release with new binary in this fork repo
           gh release delete latest --repo "$GH_REPO" --yes || true
           git tag -d latest 2>/dev/null || true
           git push origin :refs/tags/latest 2>/dev/null || true
 
-          gh release create latest "$MPP_FILE" \
+          gh release create latest $ALL_MPP \
             --repo "$GH_REPO" \
             --title "Custom Morphe Patches (Premium & Swipe Controls Defaults)" \
-            --notes "Automated build of Morphe Patches with YouTube Premium Header Logo and Swipe Controls enabled by default." \
+            --notes "Automated build of Morphe Patches with YouTube Premium Header Logo, Swipe Controls enabled, and complete MicroG RE compatibility." \
             --latest
