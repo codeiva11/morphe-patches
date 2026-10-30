@@ -52,20 +52,31 @@ jobs:
           if [ "$BEHIND_COUNT" -gt 0 ]; then
             echo "New upstream commits found ($BEHIND_COUNT). Merging upstream/main..."
             if git merge upstream/main --no-edit -m "chore: sync upstream MorpheApp/morphe-patches"; then
-              echo "Successfully merged upstream/main. Pushing merge to fork..."
-              git push origin main || true
-              echo "has_changes=true" >> $GITHUB_OUTPUT
+              echo "Successfully merged upstream/main."
             else
-              echo "Merge conflict detected! Resolving automatically using our custom defaults..."
-              git merge --abort || true
-              # Reset to upstream and re-apply our custom scripts
-              git rebase upstream/main || git rebase --abort || true
-              echo "has_changes=true" >> $GITHUB_OUTPUT
+              echo "Merge conflict detected. Resolving known custom files with upstream's version (the overlay step re-applies our customs)..."
+              # Known fork-customized files: take upstream's version for these paths only.
+              # The custom overlay (custom-overlays/) re-applies our versions right after.
+              git checkout --theirs -- extensions/youtube/src/main/java/app/morphe/extension/youtube/settings/Settings.java extensions/shared-youtube/library/src/main/java/app/morphe/extension/shared/patches/GmsCoreSupportPatch.java || true
+              git add extensions/youtube/src/main/java/app/morphe/extension/youtube/settings/Settings.java extensions/shared-youtube/library/src/main/java/app/morphe/extension/shared/patches/GmsCoreSupportPatch.java || true
+              if git diff --name-only --diff-filter=U | grep -q .; then
+                echo "ERROR: Unresolved conflicts in files other than the known custom files. Failing loudly instead of building stale code."
+                git diff --name-only --diff-filter=U
+                exit 1
+              fi
+              git -c core.editor=true merge --continue
+              echo "Merge completed with known custom files resolved to upstream."
             fi
+            git push origin main || { echo "ERROR: Failed to push merge to fork."; exit 1; }
+            echo "has_changes=true" >> $GITHUB_OUTPUT
           else
             echo "Fork is already completely up to date with upstream."
             echo "has_changes=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Apply Custom Overlay
+        run: |
+          python3 custom-overlays/apply_overlay.py
 
       - name: Ensure Fork MicroG Trust Markers
         run: |
