@@ -111,7 +111,8 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
         run: |
           chmod +x ./gradlew
-          ./gradlew build -x test -x lint -x lintVitalRelease --stacktrace
+          # 4 GB daemon heap: v2.0.0 build OOMs at the 2 GB gradle.properties default
+          ./gradlew build -x test -x lint -x lintVitalRelease --stacktrace -Dorg.gradle.jvmargs="-Xms512M -Xmx4g"
 
       - name: Publish Custom Release
         env:
