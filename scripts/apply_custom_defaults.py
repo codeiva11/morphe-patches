@@ -17,17 +17,17 @@ content, c1 = re.subn(
     content
 )
 
-# 2. Swipe left zone -> VOLUME
+# 2. Swipe left zone -> BRIGHTNESS
 content, c2 = re.subn(
     r'(SWIPE_LEFT_ZONE\s*=\s*new\s*EnumSetting<[^>]*>\s*\(\s*"morphe_swipe_left_zone"\s*,\s*SwipeZoneAction\.)[A-Za-z0-9_]+',
-    r'\g<1>VOLUME',
+    r'\g<1>BRIGHTNESS',
     content
 )
 
-# 3. Swipe right zone -> BRIGHTNESS
+# 3. Swipe right zone -> VOLUME
 content, c3 = re.subn(
     r'(SWIPE_RIGHT_ZONE\s*=\s*new\s*EnumSetting<[^>]*>\s*\(\s*"morphe_swipe_right_zone"\s*,\s*SwipeZoneAction\.)[A-Za-z0-9_]+',
-    r'\g<1>BRIGHTNESS',
+    r'\g<1>VOLUME',
     content
 )
 
