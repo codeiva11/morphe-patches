@@ -67,6 +67,15 @@ jobs:
             echo "has_changes=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Ensure Fork MicroG Trust Markers
+        run: |
+          python3 scripts/ensure_gms_fork_markers.py
+          if [[ -n $(git status --porcelain -- extensions/shared-youtube/library/src/main/java/app/morphe/extension/shared/patches/GmsCoreSupportPatch.java) ]]; then
+            git add extensions/shared-youtube/library/src/main/java/app/morphe/extension/shared/patches/GmsCoreSupportPatch.java
+            git commit -m "chore: restore fork MicroG trust markers after upstream sync" || true
+            git push origin main || true
+          fi
+
       - name: Apply Custom Premium & Swipe Defaults
         run: |
           python3 scripts/apply_custom_defaults.py
