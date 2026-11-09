@@ -23,7 +23,7 @@ internal fun inAppUpdateCheckerResourcePatch() = resourcePatch {
 
 fun inAppUpdateCheckerPatch(
     mainActivityOnCreateFingerprint: Fingerprint,
-    extensionPatch: Patch<*>,
+    extensionPatch: Patch,
     name: String = "Enable in-app update checker",
     description: String = "Checks for newer releases on GitHub and silently pre-downloads them for instant installation.",
     default: Boolean = true,
