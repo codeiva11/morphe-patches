@@ -1,6 +1,6 @@
 package app.morphe.patches.instagram.misc.extension
 
-import app.morphe.patches.instagram.shared.INSTAGRAM_MAIN_ACTIVITY_CLASS_TYPE
+import app.morphe.patches.instagram.shared.INSTAGRAM_BASE_ACTIVITY_CLASS_TYPE
 import app.morphe.patches.all.misc.extension.activityOnCreateExtensionHook
 import app.morphe.patches.all.misc.extension.sharedExtensionPatch
 
@@ -10,5 +10,5 @@ import app.morphe.patches.all.misc.extension.sharedExtensionPatch
  * at the start of the main activity's onCreate.
  */
 val sharedExtensionPatch = sharedExtensionPatch(
-    activityOnCreateExtensionHook(INSTAGRAM_MAIN_ACTIVITY_CLASS_TYPE, true)
+    activityOnCreateExtensionHook(INSTAGRAM_BASE_ACTIVITY_CLASS_TYPE, true)
 )
