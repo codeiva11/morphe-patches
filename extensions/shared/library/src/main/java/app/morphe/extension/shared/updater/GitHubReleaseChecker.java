@@ -53,6 +53,14 @@ public class GitHubReleaseChecker {
     private static boolean hasCheckedThisSession = false;
     private static final AtomicBoolean isSilentDownloading = new AtomicBoolean(false);
 
+    // Silent-download timeouts: a ~147 MB APK on mobile data stalls between
+    // reads far longer than 20 s. 30 s connect / 120 s read is generous
+    // enough for slow mobile, yet still bounded so a dead connection aborts
+    // instead of hanging forever. (Read timeout applies per read() call,
+    // not to the whole download.)
+    private static final int SILENT_CONNECT_TIMEOUT_MS = 30000;
+    private static final int SILENT_READ_TIMEOUT_MS = 120000;
+
     public static void checkUpdateOnStartup(final Context context) {
         checkUpdateOnStartup(context, DEFAULT_RELEASES_URL);
     }
@@ -813,6 +821,75 @@ public class GitHubReleaseChecker {
         }).start();
     }
 
+    // Follow the release-asset redirect chain (github.com -> object storage)
+    // and return the final URL, or null after too many redirects. The Range
+    // header for resume must go on this final URL, not on the redirect hops.
+    private static String resolveDownloadUrl(String downloadUrl) throws IOException {
+        String currentUrl = downloadUrl;
+        int redirectCount = 0;
+        while (redirectCount < 7) {
+            URL url = new URL(currentUrl);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile) Morphe-Patched-Updater");
+            conn.setRequestProperty("Accept-Encoding", "identity");
+            conn.setRequestProperty("Connection", "keep-alive");
+            conn.setConnectTimeout(SILENT_CONNECT_TIMEOUT_MS);
+            conn.setReadTimeout(SILENT_READ_TIMEOUT_MS);
+            int responseCode = conn.getResponseCode();
+            if (responseCode == HttpURLConnection.HTTP_MOVED_PERM
+                    || responseCode == HttpURLConnection.HTTP_MOVED_TEMP
+                    || responseCode == HttpURLConnection.HTTP_SEE_OTHER
+                    || responseCode == 307
+                    || responseCode == 308) {
+                String location = conn.getHeaderField("Location");
+                conn.disconnect();
+                if (location != null && !location.isEmpty()) {
+                    if (location.startsWith("/")) {
+                        URL base = new URL(currentUrl);
+                        currentUrl = new URL(base.getProtocol(), base.getHost(), base.getPort(), location).toString();
+                    } else {
+                        currentUrl = location;
+                    }
+                    redirectCount++;
+                    continue;
+                }
+            }
+            conn.disconnect();
+            return currentUrl;
+        }
+        return null;
+    }
+
+    private static HttpURLConnection openDownloadConnection(String url, long resumeFrom) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+        conn.setInstanceFollowRedirects(false);
+        conn.setRequestMethod("GET");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile) Morphe-Patched-Updater");
+        conn.setRequestProperty("Accept-Encoding", "identity");
+        conn.setRequestProperty("Connection", "keep-alive");
+        conn.setConnectTimeout(SILENT_CONNECT_TIMEOUT_MS);
+        conn.setReadTimeout(SILENT_READ_TIMEOUT_MS);
+        if (resumeFrom > 0) {
+            conn.setRequestProperty("Range", "bytes=" + resumeFrom + "-");
+        }
+        return conn;
+    }
+
+    // Resumable silent download.
+    //
+    // The old code deleted the partial .tmp (and any finished file) at the
+    // start of every cold start, opened the output stream truncating, sent no
+    // Range header, and aborted on any >20 s gap between reads. A ~147 MB
+    // APK on mobile data therefore restarted from zero on every app launch
+    // and never finished, so the "Install Update" dialog could never appear
+    // — the user had to download manually every time.
+    //
+    // Now: the partial .tmp is kept across restarts, the download resumes
+    // from its length via HTTP Range (206), and only a complete-but-wrong
+    // file (signature/digest failure) is discarded. Verification gates are
+    // unchanged and still fail-closed.
     private static void downloadApkSilently(final Context context, final String latestVersion,
                                             final String downloadUrl, final String currentVersion,
                                             final boolean isRebuild, final String assetName,
@@ -825,7 +902,9 @@ public class GitHubReleaseChecker {
             @Override
             public void run() {
                 File tempFile = new File(finalFile.getParentFile(), finalFile.getName() + ".tmp");
-                if (tempFile.exists()) tempFile.delete();
+                // A finished file that failed verification is stale/corrupt:
+                // drop it so it can never be mistaken for the update.
+                // The partial .tmp is deliberately KEPT for resume.
                 if (finalFile.exists()) finalFile.delete();
 
                 HttpURLConnection conn = null;
@@ -833,55 +912,72 @@ public class GitHubReleaseChecker {
                 FileOutputStream out = null;
 
                 try {
-                    String currentUrl = downloadUrl;
-                    int redirectCount = 0;
-                    while (redirectCount < 7) {
-                        URL url = new URL(currentUrl);
-                        conn = (HttpURLConnection) url.openConnection();
-                        conn.setInstanceFollowRedirects(false);
-                        conn.setRequestMethod("GET");
-                        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile) Morphe-Patched-Updater");
-                        conn.setRequestProperty("Accept-Encoding", "identity");
-                        conn.setRequestProperty("Connection", "keep-alive");
-                        conn.setConnectTimeout(15000);
-                        conn.setReadTimeout(20000);
-
-                        int responseCode = conn.getResponseCode();
-                        if (responseCode == HttpURLConnection.HTTP_MOVED_PERM
-                                || responseCode == HttpURLConnection.HTTP_MOVED_TEMP
-                                || responseCode == HttpURLConnection.HTTP_SEE_OTHER
-                                || responseCode == 307
-                                || responseCode == 308) {
-                            String location = conn.getHeaderField("Location");
-                            conn.disconnect();
-                            if (location != null && !location.isEmpty()) {
-                                if (location.startsWith("/")) {
-                                    URL base = new URL(currentUrl);
-                                    currentUrl = new URL(base.getProtocol(), base.getHost(), base.getPort(), location).toString();
-                                } else {
-                                    currentUrl = location;
-                                }
-                                redirectCount++;
-                                continue;
-                            }
-                        }
-                        break;
+                    String finalUrl = resolveDownloadUrl(downloadUrl);
+                    if (finalUrl == null) {
+                        throw new IOException("Too many redirects resolving download URL");
                     }
 
+                    long alreadyDownloaded = tempFile.exists() ? tempFile.length() : 0;
+
+                    conn = openDownloadConnection(finalUrl, alreadyDownloaded);
                     int code = conn.getResponseCode();
-                    if (code != HttpURLConnection.HTTP_OK) {
+                    boolean resuming = false;
+                    if (code == HttpURLConnection.HTTP_PARTIAL && alreadyDownloaded > 0) {
+                        // Verify the server resumed at exactly our offset.
+                        String contentRange = conn.getHeaderField("Content-Range");
+                        long rangeStart = -1;
+                        if (contentRange != null && contentRange.startsWith("bytes ")) {
+                            try {
+                                rangeStart = Long.parseLong(contentRange.substring(6, contentRange.indexOf('-')));
+                            } catch (Exception ignored) {}
+                        }
+                        if (rangeStart == alreadyDownloaded) {
+                            resuming = true;
+                        } else {
+                            Log.i(TAG, "Server resumed at wrong offset, restarting download from zero");
+                            alreadyDownloaded = 0;
+                            tempFile.delete();
+                            conn.disconnect();
+                            conn = openDownloadConnection(finalUrl, 0);
+                            code = conn.getResponseCode();
+                            if (code != HttpURLConnection.HTTP_OK) {
+                                throw new IOException("Server returned HTTP " + code + " after restart");
+                            }
+                        }
+                    } else if (code == HttpURLConnection.HTTP_OK) {
+                        // Server ignored Range (no resume support): restart from zero.
+                        if (alreadyDownloaded > 0) {
+                            Log.i(TAG, "Server does not support resume, restarting download from zero");
+                            alreadyDownloaded = 0;
+                            tempFile.delete();
+                        }
+                    } else if (code == 416) { // Range Not Satisfiable: stale partial
+                        Log.i(TAG, "Partial file no longer matches server, restarting download from zero");
+                        alreadyDownloaded = 0;
+                        tempFile.delete();
+                        conn.disconnect();
+                        conn = openDownloadConnection(finalUrl, 0);
+                        code = conn.getResponseCode();
+                        if (code != HttpURLConnection.HTTP_OK) {
+                            throw new IOException("Server returned HTTP " + code + " after restart");
+                        }
+                    } else {
                         throw new IOException("Server returned HTTP " + code);
                     }
 
                     in = new BufferedInputStream(conn.getInputStream(), 131072);
-                    out = new FileOutputStream(tempFile);
+                    out = new FileOutputStream(tempFile, resuming);
 
                     byte[] buffer = new byte[131072];
                     int bytesRead;
+                    long totalDownloaded = alreadyDownloaded;
                     while ((bytesRead = in.read(buffer)) != -1) {
                         out.write(buffer, 0, bytesRead);
+                        totalDownloaded += bytesRead;
                     }
                     out.flush();
+                    Log.i(TAG, "Silent download finished: " + totalDownloaded + " bytes"
+                            + (resuming ? (" (resumed from " + alreadyDownloaded + ")") : ""));
 
                     File targetApk = finalFile;
                     if (tempFile.renameTo(finalFile) || copyFile(tempFile, finalFile)) {
@@ -905,7 +1001,8 @@ public class GitHubReleaseChecker {
                     }
                 } catch (Exception e) {
                     Log.e(TAG, "Error downloading update silently in background", e);
-                    if (tempFile.exists()) tempFile.delete();
+                    // Keep the partial .tmp: the next cold start resumes it
+                    // instead of restarting a 147 MB download from zero.
                 } finally {
                     isSilentDownloading.set(false);
                     try { if (out != null) out.close(); } catch (Exception ignored) {}
@@ -1095,7 +1192,12 @@ public class GitHubReleaseChecker {
                 if (files != null) {
                     for (File file : files) {
                         if (file.isFile() && (file.getName().endsWith(".apk") || file.getName().endsWith(".tmp"))) {
-                            if (activeFileName != null && file.getName().equals(activeFileName)) {
+                            // Spare the active download AND its partial file: the
+                            // silent downloader resumes <name>.tmp across cold
+                            // starts, so deleting it here would restart a
+                            // 147 MB download from zero on every app launch.
+                            if (activeFileName != null && (file.getName().equals(activeFileName)
+                                    || file.getName().equals(activeFileName + ".tmp"))) {
                                 continue;
                             }
                             file.delete();
@@ -1112,7 +1214,12 @@ public class GitHubReleaseChecker {
                 if (files != null) {
                     for (File file : files) {
                         if (file.isFile() && (file.getName().endsWith(".apk") || file.getName().endsWith(".tmp"))) {
-                            if (activeFileName != null && file.getName().equals(activeFileName)) {
+                            // Spare the active download AND its partial file: the
+                            // silent downloader resumes <name>.tmp across cold
+                            // starts, so deleting it here would restart a
+                            // 147 MB download from zero on every app launch.
+                            if (activeFileName != null && (file.getName().equals(activeFileName)
+                                    || file.getName().equals(activeFileName + ".tmp"))) {
                                 continue;
                             }
                             file.delete();
