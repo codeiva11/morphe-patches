@@ -2,10 +2,13 @@ package app.morphe.patches.facebook.shared
 
 import app.morphe.patcher.Fingerprint
 
-internal const val FACEBOOK_MAIN_ACTIVITY_CLASS_TYPE = "Lcom/facebook/katana/activity/FbMainTabActivity;"
+// FbMainTabActivity inherits onCreate from this base activity and does not
+// declare it itself, so the fingerprint must target the base class (the
+// activity base De-Vanced itself uses for its Facebook patches).
+internal const val FACEBOOK_BASE_ACTIVITY_CLASS_TYPE = "Lcom/facebook/base/activity/FbFragmentActivity;"
 
 internal object FacebookActivityOnCreateFingerprint : Fingerprint(
-    definingClass = FACEBOOK_MAIN_ACTIVITY_CLASS_TYPE,
+    definingClass = FACEBOOK_BASE_ACTIVITY_CLASS_TYPE,
     name = "onCreate",
     returnType = "V",
     parameters = listOf("Landroid/os/Bundle;"),
