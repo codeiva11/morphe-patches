@@ -1,6 +1,6 @@
 package app.morphe.patches.facebook.misc.extension
 
-import app.morphe.patches.facebook.shared.FACEBOOK_MAIN_ACTIVITY_CLASS_TYPE
+import app.morphe.patches.facebook.shared.FACEBOOK_BASE_ACTIVITY_CLASS_TYPE
 import app.morphe.patches.all.misc.extension.activityOnCreateExtensionHook
 import app.morphe.patches.all.misc.extension.sharedExtensionPatch
 
@@ -10,5 +10,5 @@ import app.morphe.patches.all.misc.extension.sharedExtensionPatch
  * at the start of the main activity's onCreate.
  */
 val sharedExtensionPatch = sharedExtensionPatch(
-    activityOnCreateExtensionHook(FACEBOOK_MAIN_ACTIVITY_CLASS_TYPE, true)
+    activityOnCreateExtensionHook(FACEBOOK_BASE_ACTIVITY_CLASS_TYPE, true)
 )
