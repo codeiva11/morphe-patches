@@ -22,10 +22,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-      # Upstream may add workflow files (e.g. issue triage); pushing a
-      # sync that contains them needs the workflows scope, otherwise
-      # GitHub rejects the push ('without `workflows` permission').
-      workflows: write
 
     steps:
       - name: Checkout Fork
