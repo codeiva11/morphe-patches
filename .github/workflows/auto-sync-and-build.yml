@@ -67,6 +67,25 @@ jobs:
               git -c core.editor=true merge --continue
               echo "Merge completed with known custom files resolved to upstream."
             fi
+            # Fork rule: GITHUB_TOKEN can never create or update workflow files,
+            # so upstream's CI-only workflows must never land in this fork.
+            # Strip any .github/workflows/*.yml that is not one of the fork's own
+            # workflows out of the merge commit before pushing (re-applied on
+            # every sync, so future upstream workflows are excluded too).
+            # Templates and scripts under .github/ still sync normally.
+            for wf in .github/workflows/*.yml; do
+              [ -e "$wf" ] || continue
+              case "$wf" in
+                .github/workflows/auto-sync-and-build.yml|.github/workflows/build_pull_request.yml) ;;
+                *) echo "Excluding upstream workflow from sync: $wf"
+                   git rm -q --cached "$wf" 2>/dev/null || true
+                   rm -f "$wf" ;;
+              esac
+            done
+            if ! git diff --cached --quiet; then
+              git commit --amend --no-edit
+              echo "Merge commit amended: upstream workflows excluded."
+            fi
             git push origin main || { echo "ERROR: Failed to push merge to fork."; exit 1; }
             echo "has_changes=true" >> $GITHUB_OUTPUT
           else
